@@ -3,11 +3,11 @@
 import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
-import { Badge } from "@/components/ui/badge"
+
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Slider } from "@/components/ui/slider"
-import { Heart, ShoppingBag, Filter, Search, Star, Zap, CheckCircle, TrendingUp } from 'lucide-react'
+import { Heart, ShoppingBag, Filter, Search, TrendingUp } from 'lucide-react'
 import Link from "next/link"
 import { useCart } from "@/components/cart-provider"
 import { FirebaseProductService } from "@/lib/firebase-product-service"
@@ -23,10 +23,11 @@ export default function Shop() {
   const [selectedCategory, setSelectedCategory] = useState("all")
   const [searchQuery, setSearchQuery] = useState("")
   const [wishlist, setWishlist] = useState<number[]>([])
-  const [addedToCart, setAddedToCart] = useState<number[]>([])
   const [sortBy, setSortBy] = useState("recommended")
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null)
   const [isQuickViewOpen, setIsQuickViewOpen] = useState(false)
+  const [isSyncing, setIsSyncing] = useState(false)
+  const [syncStatus, setSyncStatus] = useState<string>("")
 
   const { addToCart } = useCart()
 
@@ -52,6 +53,60 @@ export default function Shop() {
       console.error('Error loading products:', error)
     } finally {
       setLoading(false)
+    }
+  }
+
+  const handleSyncProducts = async () => {
+    setIsSyncing(true)
+    setSyncStatus("Initializing sync...")
+    
+    try {
+      // Step 1: Call sync-products API
+      setSyncStatus("Syncing products from retailers...")
+      const syncResponse = await fetch('/api/sync-products', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          retailer: 'all',
+          category: 'all',
+          limit: 100
+        })
+      })
+
+      const syncResult = await syncResponse.json()
+      
+      if (!syncResponse.ok) {
+        throw new Error(syncResult.error || 'Sync failed')
+      }
+
+      setSyncStatus("Sync completed! Refreshing products...")
+      
+      // Step 2: Wait a moment for Firebase to process
+      await new Promise(resolve => setTimeout(resolve, 2000))
+      
+      // Step 3: Reload products from get-products API
+      setSyncStatus("Loading fresh products...")
+      await loadProducts()
+      
+      setSyncStatus("✅ Products updated successfully!")
+      
+      // Clear status after 3 seconds
+      setTimeout(() => {
+        setSyncStatus("")
+      }, 3000)
+      
+    } catch (error) {
+      console.error('Sync error:', error)
+      setSyncStatus(`❌ Sync failed: ${error instanceof Error ? error.message : 'Unknown error'}`)
+      
+      // Clear error after 5 seconds
+      setTimeout(() => {
+        setSyncStatus("")
+      }, 5000)
+    } finally {
+      setIsSyncing(false)
     }
   }
 
@@ -82,22 +137,7 @@ export default function Shop() {
     setWishlist((prev) => (prev.includes(productId) ? prev.filter((id) => id !== productId) : [...prev, productId]))
   }
 
-  const handleAddToCart = (product: Product) => {
-    addToCart({
-      id: product.id,
-      name: product.name,
-      brand: product.brand,
-      price: product.price,
-      image: product.images[0],
-    })
 
-    setAddedToCart((prev) => [...prev, parseInt(product.id)])
-
-    // Remove the success indicator after 2 seconds
-    setTimeout(() => {
-      setAddedToCart((prev) => prev.filter((id) => id !== parseInt(product.id)))
-    }, 2000)
-  }
 
   const handleProductQuickView = (product: Product) => {
     setSelectedProduct(product)
@@ -216,6 +256,47 @@ export default function Shop() {
 
             {/* Enhanced Products Grid */}
             <div className="lg:col-span-3">
+              {/* Sync Products Section */}
+              <div className="mb-6">
+                <Card className="border-0 shadow-lg bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 backdrop-blur-sm border border-white/20">
+                  <CardContent className="p-4">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 bg-gradient-to-r from-blue-500 to-indigo-600 rounded-full flex items-center justify-center">
+                          <TrendingUp className="w-5 h-5 text-white" />
+                        </div>
+                        <div>
+                          <h3 className="font-semibold text-gray-900 dark:text-white">Product Database</h3>
+                          <p className="text-sm text-gray-600 dark:text-gray-400">
+                            {syncStatus || "Sync latest products from ASOS, Amazon & H&M"}
+                          </p>
+                        </div>
+                      </div>
+                      <Button
+                        onClick={handleSyncProducts}
+                        disabled={isSyncing}
+                        className={`px-6 py-2 font-semibold transition-all duration-300 ${
+                          isSyncing
+                            ? "bg-gray-400 cursor-not-allowed"
+                            : "bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 transform hover:scale-105"
+                        }`}
+                      >
+                        {isSyncing ? (
+                          <>
+                            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                            Syncing...
+                          </>
+                        ) : (
+                          <>
+                            🔄 Sync Products
+                          </>
+                        )}
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+
               <div className="flex justify-between items-center mb-6">
                 <p className="text-gray-600 dark:text-gray-400">
                   Showing <span className="font-bold text-purple-600 dark:text-purple-400">{sortedProducts.length}</span> perfect matches
